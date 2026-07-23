@@ -1,46 +1,62 @@
 package gotl
 
+import (
+	"fmt"
+)
+
 type Bimap[T1 comparable, T2 comparable] interface {
-	GetByT1(key T1) (T2, error)
-	GetByT2(key T2) (T1, error)
+	Add(T1, T2) error
+	GetByT1(key T1) (T2, bool)
+	GetByT2(key T2) (T1, bool)
 }
 
-func NewBimap[T1 comparable, T2 comparable](
-	fetchByT1Fn func(T1) (T2, error),
-	fetchByT2Fn func(T2) (T1, error),
-) Bimap[T1, T2] {
+func NewBimap[T1 comparable, T2 comparable](allowOverwrite bool) Bimap[T1, T2] {
 	return &bimapImpl[T1, T2]{
-		fetchByT1Fn,
-		fetchByT2Fn,
+		allowOverwrite,
 		map[T1]T2{},
 		map[T2]T1{},
 	}
 }
 
 type bimapImpl[T1 comparable, T2 comparable] struct {
-	fetchByT1Fn func(T1) (T2, error)
-	fetchByT2Fn func(T2) (T1, error)
+	allowOverwrite bool
 
 	t1ToT2 map[T1]T2
 	t2ToT1 map[T2]T1
 }
 
-func (m *bimapImpl[T1, T2]) GetByT1(key T1) (T2, error) {
-	t2, hasKey := m.t1ToT2[key]
-	var err error
-	if !hasKey {
-		t2, err = m.fetchByT1Fn(key)
+func (m *bimapImpl[T1, T2]) Add(t1 T1, t2 T2) error {
+	existingT2, ok1 := m.t1ToT2[t1]
+	if ok1 && !m.allowOverwrite {
+		return fmt.Errorf("attempt to overwrite bimap entry disallowed (%v, %v) -> (%v, %v)", t1, existingT2, t1, t2)
 	}
 
-	return t2, err
+	existingT1, ok2 := m.t2ToT1[t2]
+	if ok2 && !m.allowOverwrite {
+		return fmt.Errorf("attempt to overwrite bimap entry disallowed (%v, %v) -> (%v, %v)", existingT1, t2, t1, t2)
+	}
+
+	if ok1 && ok2 && existingT1 == t1 && existingT2 == t2 {
+		return nil
+	}
+
+	if ok1 && existingT2 != t2 || ok2 && existingT1 != t1 {
+		delete(m.t1ToT2, existingT1)
+		delete(m.t2ToT1, existingT2)
+	}
+
+	m.t1ToT2[t1] = t2
+	m.t2ToT1[t2] = t1
+
+	return nil
 }
 
-func (m *bimapImpl[T1, T2]) GetByT2(key T2) (T1, error) {
-	t1, hasKey := m.t2ToT1[key]
-	var err error
-	if !hasKey {
-		t1, err = m.fetchByT2Fn(key)
-	}
+func (m *bimapImpl[T1, T2]) GetByT1(key T1) (T2, bool) {
+	t2, ok := m.t1ToT2[key]
+	return t2, ok
+}
 
-	return t1, err
+func (m *bimapImpl[T1, T2]) GetByT2(key T2) (T1, bool) {
+	t1, ok := m.t2ToT1[key]
+	return t1, ok
 }
